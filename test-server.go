@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-func Server() {
+func main() {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)

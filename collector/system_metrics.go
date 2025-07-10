@@ -2,35 +2,47 @@ package collector
 
 import (
 	"fmt"
+	"time"
 
-	"github.com/atrox39/logtick/config"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+
+	"github.com/atrox39/logtick/config" // Importar la configuración de tu proyecto
 )
 
+// SystemMetrics contiene las métricas recolectadas
 type SystemMetrics struct {
-	AgentName   string  `json:"agent_name"`
-	AgentID     string  `json:"agent_id"`
-	CPUPercent  float64 `json:"cpu_percent"`
-	MemoryUsage uint64  `json:"memory_usage"`
-	MemoryFree  uint64  `json:"memory_free"`
+	AgentID    string  `json:"agent_id"`
+	AgentName  string  `json:"agent_name"`
+	Timestamp  int64   `json:"timestamp"`
+	CPUPercent float64 `json:"cpu_percent"`
+	MemoryUsed uint64  `json:"memory_used_mb"` // En MB
+	MemoryFree uint64  `json:"memory_free_mb"` // En MB
 }
 
+// CollectSystemMetrics recolecta métricas de CPU y memoria, usando la configuración
 func CollectSystemMetrics(cfg *config.Config) (*SystemMetrics, error) {
-	cpuPercent, err := cpu.Percent(0, false)
+	// Obtener uso de CPU
+	cpuPercents, err := cpu.Percent(0, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get cpu percent: %w", err)
+		return nil, fmt.Errorf("error al obtener uso de CPU: %w", err)
 	}
+	cpuPercent := cpuPercents[0]
+
+	// Obtener uso de memoria
 	vMem, err := mem.VirtualMemory()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get virtual memory: %w", err)
+		return nil, fmt.Errorf("error al obtener uso de memoria: %w", err)
 	}
+
 	metrics := &SystemMetrics{
-		AgentName:   cfg.AgentName,
-		AgentID:     cfg.AgentID,
-		CPUPercent:  cpuPercent[0],
-		MemoryUsage: vMem.Used,
-		MemoryFree:  vMem.Available,
+		AgentID:    cfg.AgentID,
+		AgentName:  cfg.AgentName,
+		Timestamp:  time.Now().Unix(),
+		CPUPercent: cpuPercent,
+		MemoryUsed: vMem.Used / 1024 / 1024,
+		MemoryFree: vMem.Free / 1024 / 1024,
 	}
+
 	return metrics, nil
 }

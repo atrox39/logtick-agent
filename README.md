@@ -5,8 +5,8 @@ Logtick Agent is a simple agent that collects system metrics and sends them to a
 ## Installation
 
 ```bash
-git clone https://github.com/atrox39/logtick.git
-cd logtick
+git clone https://github.com/atrox39/logtick-agent.git
+cd logtick-agent
 go run . --init
 go build .
 ```
