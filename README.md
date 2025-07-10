@@ -32,3 +32,15 @@ target_url: http://localhost:4001/metrics
 - CPU Usage
 - Memory Usage
 - Memory Free
+
+## Web
+
+UI
+```bash
+http://localhost:9090
+```
+
+Metrics
+```bash
+http://localhost:9090/metrics
+```
