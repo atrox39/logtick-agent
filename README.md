@@ -62,3 +62,58 @@ Metrics
 ```bash
 http://localhost:9090/metrics
 ```
+
+# Docker
+
+```bash
+docker build -t logtick-agent .
+docker run -d -p 9090:9090 \
+    --name logtick-agent \
+    -v /path/to/your/config.yaml:/app/config.yaml \ # Config file
+    logtick-agent:latest
+```
+
+# Docker networking - for nginx collector, mysql collector
+
+```bash
+# Create a network
+docker network create my-monitoring-network
+# Start your MySQL container in that network
+docker run -d --name my-mysql-db --network my-monitoring-network \
+    -e MYSQL_ROOT_PASSWORD=your_password \
+    mysql:latest
+# Start your Nginx container in that network
+docker run -d --name my-nginx-web --network my-monitoring-network \
+    -p 80:80 \
+    nginx:latest # Make sure this Nginx has stub_status configured
+# Run your agent, also in that network
+docker run -d -p 9090:9090 --name logtick-agent \
+    --network my-monitoring-network \
+    -v /path/to/your/config.yaml:/app/config.yaml \ # Mount the config
+    logtick-agent:latest
+```
+
+# Docker healthcheck
+
+```bash
+# Check if the agent is running
+docker ps | grep logtick-agent
+```
+
+# Docker monitoring host
+
+```bash
+docker run -d --network host --name logtick-agent-host-net logtick-agent:latest -v /path/to/your/config.yaml:/app/config.yaml
+```
+
+# Docker monitoring host with system files
+
+```bash
+docker run -d -p 9090:9090 --name logtick-agent-privileged \
+  -v /proc:/host/proc:ro \ # Mount /proc del host en /host/proc del contenedor
+  -v /sys:/host/sys:ro \   # Mount /sys del host en /host/sys del contenedor
+  -v /:/rootfs:ro \        # Optional: for disk metrics
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \ # For Docker metrics (if you implement that collector)
+  -v /path/to/your/config.yaml:/app/config.yaml \ # Config file
+  logtick-agent:latest
+```
