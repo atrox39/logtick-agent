@@ -1,0 +1,13 @@
+agent_name: agent-1
+agent_id: uuid # Agent ID generado por el agente, no modificar ni eliminar esta línea
+interval_seconds: 5
+target_url: http://localhost:4003/metrics # Backend URL para enviar las métricas
+log_level: info # Log level (debug, info, warn, error)
+mysql:
+  enabled: true # Habilitar recolección de métricas de MySQL
+  dsn: root@tcp(127.0.0.1:3306)/blog # MySQL DSN
+  collection_interval_seconds: 5 # Intervalo específico para recolección de métricas de MySQL
+nginx:
+  enabled: true # Habilitar recolección de métricas de Nginx
+  stub_status_url: http://localhost/nginx_status # URL del endpoint ngx_http_stub_status_module
+  collection_interval_seconds: 5 # Intervalo específico para recolección de métricas de Nginx

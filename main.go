@@ -17,6 +17,7 @@ import (
 	"github.com/atrox39/logtick/collector/nginx" // Colector de Nginx
 	"github.com/atrox39/logtick/config"
 	"github.com/atrox39/logtick/sender"
+	"github.com/atrox39/logtick/utils"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -85,6 +86,7 @@ var mu sync.RWMutex // Mutex para proteger latestAgentReport
 
 func main() {
 	initAgent := flag.Bool("init", false, "Genera un archivo config.yaml inicial si no existe y sale.")
+	server := flag.Bool("server", false, "Inicia el servidor de pruebas para recibir métricas.")
 	flag.Parse()
 
 	if *initAgent {
@@ -96,6 +98,12 @@ func main() {
 		}
 		fmt.Println("Configuración inicial generada/verificada. Puedes modificarla en 'config.yaml'.")
 		os.Exit(0)
+	}
+
+	if *server {
+		utils.Server()
+		os.Exit(0)
+		return
 	}
 
 	// 1. Cargar configuración y configurar Logrus
