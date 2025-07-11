@@ -8,13 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync" // <-- Nueva importación para WaitGroup
+	"sync"
 	"syscall"
 	"time"
 
-	"github.com/atrox39/logtick/collector"       // Interfaz Collector y MetricData
-	"github.com/atrox39/logtick/collector/mysql" // Colector de MySQL
-	"github.com/atrox39/logtick/collector/nginx" // Colector de Nginx
+	"github.com/atrox39/logtick/collector"
+	"github.com/atrox39/logtick/collector/mysql"
+	"github.com/atrox39/logtick/collector/nginx"
+	"github.com/atrox39/logtick/collector/process"
 	"github.com/atrox39/logtick/config"
 	"github.com/atrox39/logtick/sender"
 	"github.com/atrox39/logtick/utils"
@@ -77,7 +78,34 @@ type AgentReport struct {
 	System    *collector.SystemMetrics `json:"system_metrics,omitempty"`
 	MySQL     *mysql.MySQLMetrics      `json:"mysql_metrics,omitempty"`
 	Nginx     *nginx.NginxMetrics      `json:"nginx_metrics,omitempty"`
+	Process   *process.ProcessMetrics  `json:"process_metrics,omitempty"`
 	// Añadir más tipos de métricas aquí según se implementen los colectores
+}
+
+type WebSocketLogHook struct {
+	sender *sender.WebSocketLogSender
+	levels []logrus.Level
+}
+
+func NewWebSocketLogHook(s *sender.WebSocketLogSender, levels []logrus.Level) *WebSocketLogHook {
+	return &WebSocketLogHook{
+		sender: s,
+		levels: levels,
+	}
+}
+
+func (h *WebSocketLogHook) Levels() []logrus.Level {
+	return h.levels
+}
+
+func (h *WebSocketLogHook) Fire(entry *logrus.Entry) error {
+	service := "agent"
+	if svc, ok := entry.Data["collector"].(string); ok {
+		service = svc
+	}
+
+	h.sender.SendLog(service, entry.Message, entry.Level.String())
+	return nil
 }
 
 // Variable global para almacenar las últimas métricas para la UI interna
@@ -129,20 +157,27 @@ func main() {
 		"log_level":         cfg.LogLevel,
 	}).Info("Configuración cargada y logger inicializado.")
 
-	// 2. Inicializar el enviador HTTP
-	httpSender := sender.NewHTTPSender(cfg.TargetURL)
-
-	// 3. Configurar contexto para el apagado elegante
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// 3. Configurar contexto para el apagado elegante (ANTES DE INICIALIZAR SENDERS/COLLECTORS)
+	// PASO CRÍTICO: No uses defer cancel() aquí. La cancelación se maneja por la señal.
+	mainCtx, mainCancel := context.WithCancel(context.Background())
+	defer mainCancel() // Asegúrate que mainCancel() se llame al final del main para limpiar goroutines
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		logrus.WithField("signal", sig).Info("Señal de terminación recibida. Iniciando apagado...")
-		cancel()
+		mainCancel() // Call mainCancel() here when a signal is received
 	}()
+
+	// 2. Inicializar los enviadores
+	httpSender := sender.NewHTTPSender(cfg.TargetURL)
+
+	// Pasa el contexto principal al WebSocketLogSender para que sepa cuándo detener su bucle de reconexión
+	wsLogSender := sender.NewWebSocketLogSender(mainCtx, cfg.WebSocketLogURL, cfg.AgentID, cfg.AgentName)
+	// No necesitas un defer wsLogSender.Close() aquí si wsLogSender.Close() ya es llamado por mainCancel a través del contexto
+
+	logrus.AddHook(NewWebSocketLogHook(wsLogSender, logrus.AllLevels))
 
 	// 4. Iniciar servidor de métricas de Prometheus y UI
 	go func() {
@@ -203,6 +238,19 @@ func main() {
 		}
 	}
 
+	// Colector de Procesos
+	if cfg.Process != nil && cfg.Process.Enabled {
+		processCollector, err := process.NewProcessCollector(cfg.Process)
+		if err != nil {
+			logrus.WithError(err).Error("No se pudo inicializar el colector de procesos. Será omitido.")
+			collectorStatus.WithLabelValues("process", cfg.AgentName, cfg.AgentID).Set(0)
+		} else {
+			activeCollectors = append(activeCollectors, processCollector)
+			logrus.Info("Colector de procesos inicializado.")
+			collectorStatus.WithLabelValues("process", cfg.AgentName, cfg.AgentID).Set(0) // Inicialmente 'down'
+		}
+	}
+
 	if len(activeCollectors) == 0 {
 		logrus.Warn("No hay colectores de métricas activos. El agente solo servirá la UI y Prometheus.")
 	}
@@ -250,16 +298,12 @@ func main() {
 					currentCollectedData[c.Name()] = collectedMetrics
 					uiDataMutex.Unlock()
 
-					// Construir el AgentReport consolidado antes de enviar
-					// Siempre enviamos el reporte completo con los últimos datos disponibles
 					fullReport := &AgentReport{
 						AgentID:   cfg.AgentID,
 						AgentName: cfg.AgentName,
 						Timestamp: time.Now().Unix(),
 					}
-					// Asignar los datos recolectados al reporte según su tipo
-					// Esto asegura que el reporte enviado contenga los últimos datos
-					// de todos los colectores que han tenido una recolección exitosa.
+
 					uiDataMutex.RLock()
 					if sysMetrics, ok := currentCollectedData["system"].(*collector.SystemMetrics); ok {
 						fullReport.System = sysMetrics
@@ -269,6 +313,9 @@ func main() {
 					}
 					if nginxMetrics, ok := currentCollectedData["nginx"].(*nginx.NginxMetrics); ok {
 						fullReport.Nginx = nginxMetrics
+					}
+					if processMetrics, ok := currentCollectedData["process"].(*process.ProcessMetrics); ok {
+						fullReport.Process = processMetrics
 					}
 					// ... añadir más tipos de métricas aquí ...
 					uiDataMutex.RUnlock()
@@ -288,7 +335,7 @@ func main() {
 						logrus.Infof("Métricas de '%s' enviadas exitosamente al backend.", c.Name())
 					}
 
-				case <-ctx.Done():
+				case <-mainCtx.Done(): // Referencia al contexto principal
 					logrus.Infof("Contexto cancelado para el colector '%s'. Deteniendo.", c.Name())
 					return // Salir de la goroutine del colector
 				}
