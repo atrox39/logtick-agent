@@ -11,6 +11,12 @@ go run . --init
 go build .
 ```
 
+## Makefile
+
+```bash
+make build
+```
+
 ## Usage
 
 ```bash
