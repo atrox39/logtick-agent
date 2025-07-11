@@ -11,6 +11,18 @@ go run . --init
 go build .
 ```
 
+## Test server only for development
+
+```bash
+go run . --server
+```
+
+-- or --
+
+```bash
+./agent --server
+```
+
 ## Makefile
 
 ```bash
